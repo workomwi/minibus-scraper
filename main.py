@@ -3,13 +3,20 @@ from ratelimit import limits, sleep_and_retry
 import datetime
 import sys
 
+from tripservice import MinskExpressService, AvtoslavaService
+
+
+minsk_express_service = MinskExpressService('https://mogilevminsk.by')
+avto_slava_service = AvtoslavaService('https://avto-slava.by')
+
+
+
+
+
 BASE_URL = 'https://mogilevminsk.by'
 CITY_ID = 2
 STATION_ID = 87
-PHONE1 = '293659214'
-PHONE2 = '293713829'
-TG_TOKEN = '6460109876:AAGzuhAJRvGpKNvQrJhvPrnbrpuMDykgedw'
-TG_CHAT_ID = '875208331'
+
 
 booked_trip = {
   # 'time': None
@@ -17,13 +24,7 @@ booked_trip = {
 }
 can_book = True
 
-HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/118.0",
-  "Accept": "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.5",
-  "Accept-Encoding": "gzip, deflate, br",
-  "Content-Type": "application/json;charset=utf-8"
-}
+
 
 
 
@@ -41,6 +42,7 @@ def get_trips(date: datetime.date):
   # result = json.loads(response.text)
   result = response.json()
   return result['data']['trips']
+
 
 def book_trip(trip: object, phone=PHONE1):
   RELATIVE_URL = '/timetable/reservation/'
@@ -88,8 +90,7 @@ def book_trip(trip: object, phone=PHONE1):
   send_tg_message(f'booked trip(phone: {phone}) on {trip["departure_time"]}')
 
 
-def send_tg_message(message: str):
-  requests.get(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage?chat_id={TG_CHAT_ID}&text={message}")
+
   
 
 
@@ -145,8 +146,8 @@ def lookup_trip(date_of_interest, time_start, time_end, target_time):
 {suitable_trip['price']} р.
 {suitable_trip['free_seats']} свободных мест
 {BASE_URL}'''
-  send_tg_message(message)
-  book_trip(suitable_trip)
+  # send_tg_message(message)
+  # book_trip(suitable_trip)
 
 
 
