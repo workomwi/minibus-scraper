@@ -1,17 +1,23 @@
+import os
 from datetime import date, datetime, time
+
 import requests
 
+from telegram import tg_log, tg_notify
 from trip import Trip
-from telegram import send_tg_message
-from const import CITY_ID, PHONE1, PHONE2
+
+CITY_ID = int(os.getenv('CITY_ID'))
+PHONE1 = os.getenv('PHONE1')
+PHONE2 = os.getenv('PHONE2')
 
 class TripService:
-  booked_trip: Trip = None
+  booked_trip: Trip
 
-  def __init__(self, domain_url: str, station_id: int) -> None:
+  def __init__(self, domain_url: str, station_id: int, booked_trip: Trip = None):
     self.domain_url = domain_url
     self.can_book = True
     self.station_id = station_id
+    self.booked_trip = booked_trip
 
 
   def get_departure_datetime(self, trip: Trip) -> datetime:
@@ -29,8 +35,14 @@ class TripService:
     
     today = date.today()
     return min(trips, key=lambda t: abs(datetime.combine(today, self.get_departure_time(t)) - datetime.combine(today, t_target)))
-    
 
+
+  def find_cheaper(self, trips: list[Trip], current_trip: Trip) -> list[Trip]:
+    if current_trip is None:
+      return []
+    return [trip for trip in trips if trip.price < current_trip.price]
+
+  
   def find_suitable(self, trips: list[Trip], t_start: time, t_end: time, t_target: time):
     suitable_trips = []
     for trip in trips:
@@ -41,13 +53,21 @@ class TripService:
         continue
       if not trip.active:
         continue
-      # if booked_trip['datetime'] is not None and booked_trip['datetime'] >= departure_time:
-      #     continue
 
       suitable_trips.append(trip)
+
+    if len(suitable_trips) == 0:
+      return None
+    
     closest_suitable = self.find_closest(suitable_trips, t_target)
     if self.booked_trip is None:
       return closest_suitable
+
+    cheaper_trips = self.find_cheaper(suitable_trips, self.booked_trip)
+
+    if len(cheaper_trips) > 0:
+      self.send_log('Found cheaper trip')
+      return self.find_closest(cheaper_trips, t_target)
 
     closest = self.find_closest([self.booked_trip, closest_suitable], t_target)
     if closest.departure_time == self.booked_trip.departure_time:
@@ -55,10 +75,11 @@ class TripService:
     return closest
 
   
-  def send_log(self, relative_url: str, log: str):
-    message = f'{self.domain_url}{relative_url}\n{log}'
+  def send_log(self, log: str):
+    message = f'{self.domain_url}\n{log}\n{datetime.now().strftime("%H:%M:%S")}'
     print(message)
-    send_tg_message(message)
+    tg_log(message)
+    tg_notify(message)
 
 
   def get_trips(self, target_date: date):
@@ -69,7 +90,7 @@ class TripService:
     }
     response = requests.post(f'{self.domain_url}{relative_url}', data=body)
     if response.status_code != 200:
-      send_tg_message(f'ERROR. {response.status_code} status. {relative_url}, body={body}')
+      self.send_log(f'ERROR. {response.status_code} status. body={body}')
       return []
     
     result = response.json()
@@ -102,7 +123,7 @@ class TripService:
 
     if not self.can_book:
       message = 'Error: Was not able to order trip. Field can_book is False'
-      self.send_log(relative_url, message)
+      self.send_log(message)
       return None
 
     response = requests.post(f'{self.domain_url}{relative_url}', json=body)
@@ -111,7 +132,7 @@ class TripService:
     
     if data is None:
       message = 'Error: data is None'
-      self.send_log(relative_url, message)
+      self.send_log(message)
       return None
     
     if 'no_free_seats' in data:
@@ -123,15 +144,15 @@ class TripService:
     success = data.get('every_was_fine', None)
     if success is None:
       message = f'Error: {data}'
-      self.send_log(relative_url, message)
+      self.send_log(message)
       
-      if phone == PHONE2 and 'trip_max_seat_limit' in data:
+      if phone == PHONE2 and ('trip_max_seat_limit' in data or 'time_limit' in data):
         self.can_book = False
         message = 'Error: Hit trip limit on 2nd phone. Service disabled'
-        self.send_log(relative_url, message)
+        self.send_log(message)
         return None
       
-      if 'trip_max_seat_limit' in data:
+      if 'trip_max_seat_limit' in data or 'time_limit' in data:
         return self.book_trip(trip, firstname, PHONE2)
       
       return None
@@ -140,12 +161,12 @@ class TripService:
 {trip.date} {trip.departure_time}
 {trip.route}
 {trip.transport}'''
-    self.send_log(relative_url, success_message)
+    self.send_log(success_message)
     self.booked_trip = trip
 
     if phone == PHONE2:
       self.can_book = False
       message = 'Ordered both. Service disabled'
-      self.send_log(relative_url, message)
+      self.send_log(message)
 
     return trip
